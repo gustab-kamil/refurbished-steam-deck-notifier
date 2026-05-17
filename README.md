@@ -7,27 +7,27 @@
 [![Ko-fi](https://img.shields.io/badge/Buy%20me%20a%20coffee-Ko--fi-FF5E5B?logo=kofi&logoColor=white&style=flat)](https://ko-fi.com/looti)
 # Refurbished Steam Deck Notifier
 
-This script checks the availability of refurbished Steam Decks on Steam and sends notifications to a specified Discord webhook. It queries Steam's API and compares the current stock status with previously stored values.
+This script checks the availability of refurbished Steam Decks on Steam and sends notifications when stock availability changes. It supports both **Discord webhook** and **ntfy.sh** notification backends, and compares the current stock status with previously stored values.
 
 ## 🚀 Features
 
 * Checks the availability of refurbished Steam Decks for a configurable country
-* Sends notifications via a **Discord webhook** when stock availability changes
+* Sends notifications via **Discord webhook** or **ntfy.sh**
 * Supports different Steam Deck models (LCD & OLED versions)
 * Prevents duplicate notifications by storing the last known stock status
 * **Optional CSV logging** for availability statistics
 * **Configurable Discord role pings** via JSON file
 * **Command-line arguments** for easy configuration
-* **Prebuilt executables** for users who don’t want to install Python
+* **Wrapper script** for topic-specific ntfy checks
 
 ## 📋 Requirements (for Python script users)
 
 ### Install Dependencies
 
-Ensure you have **Python 3.x** installed. Then, install the required dependencies using:
+Ensure you have **Python 3.x** installed. Then install the required dependencies using:
 
 ```bash
-pip install requests discord-webhook
+pip install -r requirements.txt
 ```
 
 ## 🛠 Setup & Usage
@@ -54,24 +54,29 @@ You can pass the same arguments as you would for the Python version.
 ### Option 2: Run the Python Script
 
 ```bash
-python steam_deck_checker.py --webhook-url "https://discord.com/api/webhooks/YOUR_WEBHOOK"
+python notifier.py --webhook-url "https://discord.com/api/webhooks/YOUR_WEBHOOK"
 ```
 
 ### Command Line Arguments
 
-* `-h`: Provides list of possible Arguments
-* `--webhook-url`: Discord webhook URL for notifications (**required**)
-* `--country-code`: Country code for Steam API (default: `DE`, **important**)
+* `-h`: List available arguments
+* `--notify-backend`: Notification backend (`discord` or `ntfy`, default: `discord`)
+* `--webhook-url`: Discord webhook URL for notifications
+* `--webhook-url-new`: Separate Discord webhook for new model notifications (optional)
+* `--ntfy-topic`: ntfy.sh topic name to post notifications to
+* `--ntfy-server`: ntfy server base URL (default: `https://ntfy.sh`)
+* `--ntfy-token`: Bearer token for ntfy (optional)
+* `--country-code`: Country code for Steam API (default: `DE`)
 * `--role-mapping`: JSON file containing Discord role mappings (optional)
 * `--csv-dir`: Directory path for daily CSV log files (optional)
 
 ### Full Example
 
 ```bash
-python steam_deck_checker.py \
+python notifier.py \
+  --notify-backend ntfy \
+  --ntfy-topic YOUR_TOPIC \
   --country-code US \
-  --webhook-url "https://discord.com/api/webhooks/YOUR_WEBHOOK" \
-  --role-mapping roles.json \
   --csv-dir csv-logs
 ```
 
@@ -109,7 +114,7 @@ The script checks availability for these models:
 
 1. Requests stock status for Steam Deck models via Steam’s API
 2. Compares new status with the last known state stored in text files
-3. Sends a Discord notification if availability changes
+3. Sends a notification if availability changes
 4. Optionally pings configured roles via `roles.json`
 5. Optionally logs the check results to a CSV file
 
@@ -127,7 +132,7 @@ When using `--csv-dir`, the script writes one CSV file for each day to the speci
 
 This script/executable **does not run continuously**. Use cron (Linux/macOS) or Task Scheduler (Windows) to automate execution.
 
-### Example (Linux/macOS)
+### Example (Linux/macOS) for notifier.py
 
 Edit your crontab with:
 
@@ -135,10 +140,27 @@ Edit your crontab with:
 crontab -e
 ```
 
-Add this line to check every 3 minutes:
+Add this line to check every 5 minutes via ntfy:
 
 ```bash
-*/3 * * * * /path/to/steam_deck_notifier --webhook-url "YOUR_WEBHOOK" >> /path/to/logfile.log 2>&1
+*/5 * * * * /usr/bin/python3 /home/kamil/private-repos/refurbished-steam-deck-notifier/notifier.py \
+  --notify-backend ntfy \
+  --ntfy-topic kamil-steamdeck \
+  --country-code DE >> /home/kamil/private-repos/refurbished-steam-deck-notifier/ntfy-check.log 2>&1
+```
+
+### Example wrapper script usage
+
+If you prefer to use the included wrapper for the ntfy topic, run:
+
+```bash
+python run_steamdeck_ntfy.py
+```
+
+Add this wrapper to cron with:
+
+```bash
+*/5 * * * * /usr/bin/python3 /home/kamil/private-repos/refurbished-steam-deck-notifier/run_steamdeck_ntfy.py >> /home/kamil/private-repos/refurbished-steam-deck-notifier/ntfy-check.log 2>&1
 ```
 
 ## 📦 Dependencies & Attribution
