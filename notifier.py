@@ -16,12 +16,16 @@
 
 from time import gmtime, strftime
 import requests
-from discord_webhook import DiscordWebhook
+try:
+    from discord_webhook import DiscordWebhook
+except Exception:
+    DiscordWebhook = None
 import os
 import csv
 from datetime import datetime
 import argparse
 import json
+from typing import Optional
 
 
 # Default values
@@ -74,15 +78,35 @@ def log_availability_data(version, package_id, available, is_oled, csv_dir: str,
         writer = csv.writer(f)
         writer.writerow([unix_timestamp, version, display_type, package_id, available])
 
-def superduperscraper(model: SteamDeckModel, csv_dir: str, country_code: str, webhook_url: str, webhook_url_new: str, role_ids: dict):
+def send_ntfy_notification(message: str, server: str, topic: str, token: Optional[str] = None, title: Optional[str] = None):
+    """Send a notification to ntfy.sh using a POST to /<topic>.
+    Optionally provide a Bearer token via `token` and a `Title` header.
+    """
+    if not topic:
+        print("ntfy topic not configured; skipping ntfy notification")
+        return
+
+    url = server.rstrip('/') + '/' + topic
+    headers = {}
+    if title:
+        headers['Title'] = title
+    if token:
+        headers['Authorization'] = f"Bearer {token}"
+
+    try:
+        resp = requests.post(url, data=message.encode('utf-8'), headers=headers, timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Error sending ntfy notification: {e}")
+
+def superduperscraper(model: SteamDeckModel, csv_dir: str, country_code: str, webhook_url: str, webhook_url_new: str, role_ids: dict, notify_backend: str = 'discord', ntfy_server: str = 'https://ntfy.sh', ntfy_topic: str = '', ntfy_token: str = ''):
     # Build Steam API URL with country code
     url = f'https://api.steampowered.com/IPhysicalGoodsService/CheckInventoryAvailableByPackage/v1?origin=https:%2F%2Fstore.steampowered.com&country_code={country_code}&packageid='
     
-    # Determine which webhook URL to use based on model type
-    active_webhook_url = webhook_url_new if (model.is_new and webhook_url_new) else webhook_url
-    
-    # Create Discord webhook
-    webhook = DiscordWebhook(url=active_webhook_url, content="error")
+    # Determine which webhook URL to use based on model type (only used for Discord backend)
+    active_webhook_url = ''
+    if notify_backend == 'discord':
+        active_webhook_url = webhook_url_new if (model.is_new and webhook_url_new) else webhook_url
     
     roleIdWithCountry = role_ids.get(model.package_id, "") if role_ids else ""
     
@@ -111,21 +135,34 @@ def superduperscraper(model: SteamDeckModel, csv_dir: str, country_code: str, we
         
         # Check if status changed
         status_changed = oldvalue != availability and oldvalue != ""
-        
+
         # Log data
         log_availability_data(model.version, model.package_id, availability == "True", model.is_oled, csv_dir, country_code)
-        
-        # Send Discord notification only on status change
+
+        # Send notification only on status change (Discord or ntfy)
         if status_changed:
             display_type = "OLED" if model.is_oled else "LCD"
             condition_type = "new" if model.is_new else "refurbished"
             if availability == "True":
                 # Include role ping only if role ID exists
                 role_ping = f" <@&{roleIdWithCountry}>" if roleIdWithCountry else ""
-                webhook.content = f"{condition_type} {model.version}GB {display_type} steam deck available{role_ping}"
+                message = f"{condition_type} {model.version}GB {display_type} steam deck available{role_ping}"
             else:
-                webhook.content = f"{condition_type} {model.version}GB {display_type} steam deck not available"
-            webhook.execute()
+                message = f"{condition_type} {model.version}GB {display_type} steam deck not available"
+
+            # Send via selected backend
+            try:
+                if notify_backend == 'discord' and active_webhook_url:
+                    webhook = DiscordWebhook(url=active_webhook_url, content=message)
+                    webhook.execute()
+                elif notify_backend == 'ntfy':
+                    title = f"Steam Deck {model.version}GB {'OLED' if model.is_oled else 'LCD'}"
+                    send_ntfy_notification(message, ntfy_server, ntfy_topic, ntfy_token, title=title)
+                else:
+                    # Fallback: print message
+                    print(message)
+            except Exception as e:
+                print(f"Error sending notification for {model.version}GB: {e}")
             
     except requests.RequestException as e:
         print(f"Error fetching data for {model.version}GB: {e}")
@@ -155,6 +192,11 @@ def main():
     parser.add_argument('--webhook-url', default=DEFAULT_WEBHOOK_URL,
                        help='Discord webhook URL for notifications')
     parser.add_argument('--webhook-url-new', help='Discord webhook URL for seperate new model notifications (optional, defaults to --webhook-url)')
+    parser.add_argument('--notify-backend', choices=['discord', 'ntfy'], default='discord',
+                       help='Notification backend to use: "discord" or "ntfy" (default: discord)')
+    parser.add_argument('--ntfy-topic', help='ntfy.sh topic name to post notifications to')
+    parser.add_argument('--ntfy-server', default='https://ntfy.sh', help='ntfy server base URL (default: https://ntfy.sh)')
+    parser.add_argument('--ntfy-token', help='Bearer token for ntfy (optional)')
     parser.add_argument('--role-mapping', help='JSON file containing package_id to role_id mapping')
     parser.add_argument('--csv-log', help='Deprecated: This option is no longer supported (last supported version v2.0.0).')
     
@@ -177,6 +219,9 @@ def main():
     
     print(f"Country code: {args.country_code}")
     print(f"Webhook URL: {args.webhook_url}")
+    print(f"Notify backend: {args.notify_backend}")
+    if args.notify_backend == 'ntfy':
+        print(f"ntfy topic: {args.ntfy_topic}")
     
     # Steam Deck models
     refurbModels = [
@@ -213,8 +258,9 @@ def main():
         print("No role mapping - notifications will not ping roles")
     
     for model in models:
-        superduperscraper(model, csv_dir, 
-                         args.country_code, args.webhook_url, args.webhook_url_new, role_ids)
+        superduperscraper(model, csv_dir,
+                         args.country_code, args.webhook_url, args.webhook_url_new, role_ids,
+                         args.notify_backend, args.ntfy_server, args.ntfy_topic, args.ntfy_token)
 
 if __name__ == "__main__":
     main()

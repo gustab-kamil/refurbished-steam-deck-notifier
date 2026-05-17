@@ -1,0 +1,22 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env/
+.venv/
+env/
+
+# Logs, temp files, and local state
+*.log
+*_??.txt
+*.csv
+
+# Local wrapper script for personal ntfy checks
+run_steamdeck_ntfy.py
+
+# Editor directories
+.vscode/
+.idea/
